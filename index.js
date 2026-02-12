@@ -4,6 +4,16 @@ import fetch from "node-fetch";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 
+import pkg from "pg";
+const { Pool } = pkg;
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
+
 dotenv.config();
 
 const app = express();
@@ -49,27 +59,47 @@ function verifyToken(req, res, next) {
 // =============================
 // HEALTH CHECK
 // =============================
-
+app.get("/debug-users", async (req, res) => {
+  const result = await pool.query("SELECT * FROM users");
+  res.json(result.rows);
+});
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 // =============================
 // LOGIN
 // =============================
 
-app.post("/login", (req, res) => {
-  const { email } = req.body;
+app.post("/login", async (req, res) => {
+  try {
+    const { email } = req.body;
 
-  if (!email || !allowedEmails.includes(email)) {
-    return res.status(401).json({ error: "Correo no autorizado" });
+    if (!email) {
+      return res.status(400).json({ error: "Email requerido" });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM users WHERE email = $1 AND active = true",
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const user = result.rows[0];
+
+    const token = jwt.sign(
+      { email: user.email, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "2h" }
+    );
+
+    res.json({ token });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error servidor" });
   }
-
-  const token = jwt.sign(
-    { email },
-    process.env.JWT_SECRET,
-    { expiresIn: "2h" }
-  );
-
-  res.json({ token });
 });
 
 // =============================
