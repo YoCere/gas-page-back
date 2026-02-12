@@ -15,6 +15,11 @@ const pool = new Pool({
 });
 
 dotenv.config();
+app.get("/debug-users", async (req, res) => {
+  const result = await pool.query("SELECT * FROM users");
+  res.json(result.rows);
+});
+app.get("/health", (req, res) => res.json({ ok: true }));
 
 const app = express();
 app.use(cors());
@@ -59,11 +64,6 @@ function verifyToken(req, res, next) {
 // =============================
 // HEALTH CHECK
 // =============================
-app.get("/debug-users", async (req, res) => {
-  const result = await pool.query("SELECT * FROM users");
-  res.json(result.rows);
-});
-app.get("/health", (req, res) => res.json({ ok: true }));
 
 // =============================
 // LOGIN
