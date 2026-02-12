@@ -20,7 +20,8 @@ const PORT = process.env.PORT || 3000;
 // 🔥 Puedes luego mover esto a base de datos
 const allowedEmails = [
   "jose@email.com",
-  "amigo@email.com"
+  "amigo@email.com",
+  "gnaviatellez2@gmail.com"
 ];
 
 // =============================
