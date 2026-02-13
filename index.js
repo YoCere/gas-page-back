@@ -3,39 +3,33 @@ import cors from "cors";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
-
 import pkg from "pg";
-const { Pool } = pkg;
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
 
 dotenv.config();
+
+const { Pool } = pkg;
+
+// =============================
+// APP INIT
+// =============================
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
-// =============================
-// CONFIGURACIÓN BÁSICA
-// =============================
-
 const PORT = process.env.PORT || 3000;
 
-// Lista simple de correos autorizados
-// 🔥 Puedes luego mover esto a base de datos
-const allowedEmails = [
-  "jose@email.com",
-  "amigo@email.com",
-  "gnaviatellez2@gmail.com"
-];
+// =============================
+// DB CONNECTION
+// =============================
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 // =============================
-// MIDDLEWARE PARA VALIDAR TOKEN
+// MIDDLEWARES
 // =============================
 
 function verifyToken(req, res, next) {
@@ -51,17 +45,28 @@ function verifyToken(req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ error: "Token inválido" });
   }
 }
 
-// =============================
-// HEALTH CHECK
-// =============================
+function verifyAdmin(req, res, next) {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ error: "Solo admin permitido" });
+  }
+  next();
+}
 
 // =============================
-// LOGIN
+// HEALTH
+// =============================
+
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+// =============================
+// LOGIN (case insensitive)
 // =============================
 
 app.post("/login", async (req, res) => {
@@ -73,8 +78,8 @@ app.post("/login", async (req, res) => {
     }
 
     const result = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND active = true",
-      [email]
+      "SELECT * FROM users WHERE LOWER(email) = LOWER($1) AND active = true",
+      [email.trim()]
     );
 
     if (result.rows.length === 0) {
@@ -1093,18 +1098,68 @@ const recipes = [
     title: "Crema de Chayote y Calabaza con Huevo",
     image: "images/5domingo3.png",
     recipe:
-      "Ingredientes: 200g de chayote pelado, 200g de calabaza, 100g de patata, 500ml de agua o caldo desgrasado, 1 huevo (60g), 5ml (1 cdita) de aceite de oliva, sal mínima.\n1. Hervir chayote + calabaza + patata 18-20 minutos hasta muy tiernos.\n2. Triturar hasta crema fina y volver a fuego bajo.\n3. Añadir el huevo batido en hilo, removiendo 1-2 minutos hasta cuajar suave.\n4. Servir tibia y añadir el aceite al final.",
-    prompt: "Smooth chayote and pumpkin cream soup with soft egg ribbons, warm bowl"
+      "Ingredientes: 200g de chayote pelado..."
   }
 ];
 
-// Endpoint protegido
 app.get("/recipes", verifyToken, (req, res) => {
   res.json(recipes);
 });
 
 // =============================
-// GEMINI (PROTEGIDO TAMBIÉN)
+// ADMIN ENDPOINTS
+// =============================
+
+// Ver todos los usuarios
+app.get("/admin/users", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, email, role, active FROM users ORDER BY id ASC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Error servidor" });
+  }
+});
+
+// Agregar usuario
+app.post("/admin/add-user", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { email, role } = req.body;
+
+    if (!email || !role) {
+      return res.status(400).json({ error: "Datos incompletos" });
+    }
+
+    await pool.query(
+      "INSERT INTO users (email, role, active) VALUES ($1, $2, true)",
+      [email.trim(), role]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Error servidor" });
+  }
+});
+
+// Activar / desactivar usuario
+app.put("/admin/toggle-user/:id", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await pool.query(
+      "UPDATE users SET active = NOT active WHERE id = $1",
+      [id]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Error servidor" });
+  }
+});
+
+// =============================
+// GEMINI PROTEGIDO
 // =============================
 
 app.post("/gemini", verifyToken, async (req, res) => {
@@ -1115,14 +1170,9 @@ app.post("/gemini", verifyToken, async (req, res) => {
       return res.status(400).json({ error: "prompt requerido" });
     }
 
-    const apiKey = process.env.GEMINI_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "Falta GEMINI_KEY" });
-    }
-
     const url =
       `https://generativelanguage.googleapis.com/v1beta/models/` +
-      `gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+      `gemini-2.5-flash-preview-09-2025:generateContent?key=${process.env.GEMINI_KEY}`;
 
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],
@@ -1138,13 +1188,16 @@ app.post("/gemini", verifyToken, async (req, res) => {
     });
 
     const data = await r.json();
-
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
     res.json({ text });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Error servidor" });
   }
 });
+
+// =============================
+// START
+// =============================
 
 app.listen(PORT, () => console.log("API running on", PORT));
