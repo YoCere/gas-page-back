@@ -46,7 +46,7 @@ function verifyToken(req, res, next) {
     req.user = decoded;
     next();
   } catch {
-    return res.status(401).json({ error: "Token inválido" });
+    return res.status(401).json({ error: "Token inválido o expirado" });
   }
 }
 
@@ -97,7 +97,7 @@ app.post("/login", async (req, res) => {
     res.json({ token });
 
   } catch (err) {
-    console.error(err);
+    console.error("LOGIN ERROR:", err);
     res.status(500).json({ error: "Error servidor" });
   }
 });
@@ -1100,7 +1100,7 @@ const recipes = [
     recipe:
       "Ingredientes: 200g de chayote pelado..."
   }
-];
+]; // aquí pones tu array completo
 
 app.get("/recipes", verifyToken, (req, res) => {
   res.json(recipes);
@@ -1110,7 +1110,7 @@ app.get("/recipes", verifyToken, (req, res) => {
 // ADMIN ENDPOINTS
 // =============================
 
-// Ver todos los usuarios
+// Obtener usuarios (solo admin)
 app.get("/admin/users", verifyToken, verifyAdmin, async (req, res) => {
   try {
     const result = await pool.query(
@@ -1118,26 +1118,39 @@ app.get("/admin/users", verifyToken, verifyAdmin, async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
+    console.error("GET USERS ERROR:", err);
     res.status(500).json({ error: "Error servidor" });
   }
 });
 
-// Agregar usuario
+// Agregar usuario (SIEMPRE rol user)
+// 🔥 YA NO SE PUEDE CREAR ADMIN DESDE FRONT
 app.post("/admin/add-user", verifyToken, verifyAdmin, async (req, res) => {
   try {
-    const { email, role } = req.body;
+    const { email } = req.body;
 
-    if (!email || !role) {
-      return res.status(400).json({ error: "Datos incompletos" });
+    if (!email) {
+      return res.status(400).json({ error: "Email requerido" });
+    }
+
+    const existing = await pool.query(
+      "SELECT id FROM users WHERE LOWER(email) = LOWER($1)",
+      [email.trim()]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: "Usuario ya existe" });
     }
 
     await pool.query(
-      "INSERT INTO users (email, role, active) VALUES ($1, $2, true)",
-      [email.trim(), role]
+      "INSERT INTO users (email, role, active) VALUES ($1, 'user', true)",
+      [email.trim()]
     );
 
     res.json({ success: true });
+
   } catch (err) {
+    console.error("ADD USER ERROR:", err);
     res.status(500).json({ error: "Error servidor" });
   }
 });
@@ -1153,7 +1166,9 @@ app.put("/admin/toggle-user/:id", verifyToken, verifyAdmin, async (req, res) => 
     );
 
     res.json({ success: true });
+
   } catch (err) {
+    console.error("TOGGLE USER ERROR:", err);
     res.status(500).json({ error: "Error servidor" });
   }
 });
@@ -1191,7 +1206,9 @@ app.post("/gemini", verifyToken, async (req, res) => {
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
     res.json({ text });
-  } catch {
+
+  } catch (err) {
+    console.error("GEMINI ERROR:", err);
     res.status(500).json({ error: "Error servidor" });
   }
 });
