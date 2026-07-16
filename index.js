@@ -1237,10 +1237,22 @@ REGLAS:
 
 app.post("/chat", verifyToken, async (req, res) => {
   try {
-    const { messages } = req.body ?? {};
+    const { messages, currentRecipe } = req.body ?? {};
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "messages requerido" });
+    }
+
+    let systemPrompt = CHAT_SYSTEM_PROMPT;
+
+    if (currentRecipe) {
+      systemPrompt += `\n\nRECETA QUE EL USUARIO ESTÁ VIENDO AHORA:
+- Día: ${currentRecipe.day}
+- Comida: ${currentRecipe.meal}
+- Título: ${currentRecipe.title}
+- Receta: ${currentRecipe.recipe}
+
+Cuando el usuario pregunte sobre "esta receta" o haga preguntas sin especificar cuál, refiere a esta receta. Ofrece sustituciones si el usuario es intolerante a algún ingrediente.`;
     }
 
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -1252,7 +1264,7 @@ app.post("/chat", verifyToken, async (req, res) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: CHAT_SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           ...messages.slice(-10)
         ],
         max_tokens: 300
