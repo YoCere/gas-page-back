@@ -1214,6 +1214,68 @@ app.post("/gemini", verifyToken, async (req, res) => {
 });
 
 // =============================
+// CHATBOT (OpenAI)
+// =============================
+
+const recipeSummary = recipes
+  .filter(r => r.recipe)
+  .map(r => `${r.day} - ${r.meal}: ${r.title}\n${r.recipe}`)
+  .join("\n\n");
+
+const CHAT_SYSTEM_PROMPT = `Eres un asistente nutricional especializado en gastritis. Conoces a fondo el siguiente plan de recetas semanal y puedes aconsejar sobre alimentación para personas con gastritis.
+
+RECETAS DEL PLAN:
+${recipeSummary}
+
+REGLAS:
+- Responde siempre en español.
+- Sé breve y claro (máximo 150 palabras por respuesta).
+- Si preguntan por recetas, refiere las del plan cuando aplique.
+- Si preguntan algo médico grave, recomienda ir al doctor.
+- Puedes sugerir sustituciones de ingredientes siempre que sean aptas para gastritis.
+- No inventes recetas fuera del contexto de gastritis.`;
+
+app.post("/chat", verifyToken, async (req, res) => {
+  try {
+    const { messages } = req.body ?? {};
+
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: "messages requerido" });
+    }
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: CHAT_SYSTEM_PROMPT },
+          ...messages.slice(-10)
+        ],
+        max_tokens: 300
+      })
+    });
+
+    const data = await r.json();
+
+    if (data.error) {
+      console.error("OPENAI ERROR:", data.error);
+      return res.status(500).json({ error: "Error IA" });
+    }
+
+    const text = data.choices?.[0]?.message?.content ?? "";
+    res.json({ text });
+
+  } catch (err) {
+    console.error("CHAT ERROR:", err);
+    res.status(500).json({ error: "Error servidor" });
+  }
+});
+
+// =============================
 // START
 // =============================
 
